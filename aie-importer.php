@@ -8,6 +8,8 @@
  * Text Domain: aie-importer
  */
 
+require_once __DIR__ . '/src/Services/ImporterService.php';
+
 // Load PhpSpreadsheet only when running via WP-CLI to avoid unnecessary overhead in wp-admin.
 if ( defined( 'WP_CLI' ) && WP_CLI ) {
     require_once __DIR__ . '/vendor/autoload.php';
