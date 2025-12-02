@@ -1,0 +1,108 @@
+{
+	"project": "aieimporter – Excel Importer UX Upgrade",
+	"architecture": {
+		"role_of_this_plugin": "aieimporter is an independent WordPress plugin whose only responsibility is to import albums and singles from an Excel file into the existing AIE system.",
+		"external_dependency": "The main AIE Costa Rica plugin defines the CPTs, ACF fields, FieldConstants, and Gravity Forms logic. The importer must respect this model but must not modify the main plugin."
+	},
+	"overview": {
+		"description": "Create a simple admin UI for the standalone plugin 'aieimporter'. The UI will allow editors to upload the official Excel file and trigger the import with one click, using the same data structures and ACF field architecture defined in the main AIE Costa Rica plugin.",
+		"goals": [
+			"Enable Excel import through a non-technical admin interface",
+			"Refactor the WP-CLI importer into a reusable ImporterService",
+			"Reproduce the exact ACF repeater and nested repeater structure used by Gravity Forms",
+			"Ensure all data matches the model from the main AIE plugin"
+		]
+	},
+	"business_rules": {
+		"type_detection": {
+			"album": "If ID_ALBUM is present, create a 'fonograma' post.",
+			"single": "If ID_ALBUM is empty, create a 'sencillo' post."
+		},
+		"title_logic": {
+			"album": "Post title is the album title column.",
+			"single": "Post title is the track title column."
+		},
+		"acf_structure": {
+			"description": "The importer must generate the same nested ACF structure that the main plugin produces when Gravity Forms creates posts.",
+			"repeaters": {
+				"temas_data": "Repeater: each row represents one song.",
+				"nested_interpretes": "Nested repeater inside each song: performer name, user ID, instrument, role."
+			}
+		},
+		"user_matching": {
+			"method": "Match performers using 'cédula' via the main plugin's user meta 'numero_de_identificacion'.",
+			"note": "If no user is found, log a warning but continue."
+		},
+		"excel_rules": {
+			"file": "Ejemplo_ALBUM_SOLO.xlsx",
+			"immutable": true,
+			"description": "This Excel format is final. The importer must not modify, preprocess, or remap columns."
+		}
+	},
+	"technical_requirements": {
+		"admin_ui": {
+			"menu": "AIE Importer",
+			"fields": ["File upload field", "Start Import button"],
+			"simplicity": "UI must be extremely simple and client-friendly, no settings or configurations."
+		},
+		"importer_service": {
+			"class": "AIECostaRica\\ImporterService (inside aieimporter plugin)",
+			"responsibilities": [
+				"Load Excel using PHPSpreadsheet",
+				"Group rows by ID_ALBUM",
+				"Create CPT posts defined in the main plugin",
+				"Populate ACF fields using literal field keys from the main AIE plugin",
+				"Build song repeaters and performer nested repeaters",
+				"Assign post author using cédula matching",
+				"Return structured results for UI display"
+			]
+		},
+		"logging": {
+			"location": "/wp-content/uploads/aieimporter/logs/",
+			"format": "Each import produces a readable summary log.",
+			"display": "Summary shown in admin after each import"
+		}
+	},
+	"importer_adjustments": {
+		"determine_type_with_id_album": true,
+		"set_titles_based_on_type": true,
+		"handle_single_track_properly": true,
+		"sanitize_and_validate_fields": true,
+		"align_with_fieldconstants": true,
+		"remove_cli_only_logic": true
+	},
+	"timeline": {
+		"estimate_hours": 16,
+		"distribution": "Spread across one week for stability and testing",
+		"tasks": [
+			{"task": "Refactor existing importer into ImporterService", "hours": "3-4"},
+			{"task": "Create simple admin UI page", "hours": "2-3"},
+			{"task": "Integrate upload + ImporterService", "hours": "3-4"},
+			{"task": "Implement logs + result summaries", "hours": "2"},
+			{"task": "Testing with real Excel files and edge cases", "hours": "3-4"}
+		]
+	},
+	"constraints": {
+		"excel_not_modifiable": true,
+		"no_csv_conversion": true,
+		"no_wp_all_import": true,
+		"must_use_acf_literal_field_keys": true,
+		"editor_must_be_able_to_use_without_training": true
+	},
+	"agent_responsibilities": [
+		"Understand the ACF + CPT model from the main AIE plugin",
+		"Generate WordPress-compliant code (PHP 8+, ACF, CPTs)",
+		"Use literal field keys for repeaters and nested repeaters",
+		"Do not modify the Excel file in any way",
+		"Respect existing architecture (Services, FieldConstants)",
+		"Produce maintainable and clean code for the independent aieimporter plugin"
+	],
+	"deliverables": [
+		"ImporterService.php inside aieimporter",
+		"Admin upload page for aieimporter",
+		"Controller to execute import",
+		"Logging system",
+		"Updated plugin loader",
+		"Internal documentation for maintainers"
+	]
+}

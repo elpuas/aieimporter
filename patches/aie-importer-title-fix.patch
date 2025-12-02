@@ -1,0 +1,335 @@
+--- a/aie-importer.php
++++ b/aie-importer.php
+@@ -17,6 +17,190 @@
+ 
+ use PhpOffice\PhpSpreadsheet\IOFactory;
+ 
++/**
++ * Normalize text coming from the spreadsheet rows.
++ */
++function aie_importer_clean_text( $value ) {
++    if ( null === $value ) {
++        return '';
++    }
++    $value = trim( (string) $value );
++    if ( '' === $value ) {
++        return '';
++    }
++    if ( class_exists( '\\Normalizer' ) ) {
++        $value = \Normalizer::normalize( $value, \Normalizer::FORM_C );
++    }
++    $value = preg_replace( '/[\x00-\x1F\x7F]/u', '', $value );
++    $value = preg_replace( '/\p{Cf}+/u', '', $value );
++    return trim( $value );
++}
++
++function aie_importer_lower( $value ) {
++    return function_exists( 'mb_strtolower' )
++        ? mb_strtolower( $value, 'UTF-8' )
++        : strtolower( $value );
++}
++
++function aie_importer_remove_diacritics( $value ) {
++    if ( '' === $value ) {
++        return '';
++    }
++    if ( class_exists( '\\Normalizer' ) ) {
++        $value = \Normalizer::normalize( $value, \Normalizer::FORM_D );
++        $value = preg_replace( '/\p{Mn}+/u', '', $value );
++        $value = \Normalizer::normalize( $value, \Normalizer::FORM_C );
++        return $value;
++    }
++    $ascii = @iconv( 'UTF-8', 'ASCII//TRANSLIT//IGNORE', $value );
++    return false !== $ascii ? $ascii : $value;
++}
++
++function aie_importer_normalize_header_key( $value ) {
++    $value = aie_importer_clean_text( $value );
++    if ( '' === $value ) {
++        return '';
++    }
++    $value = aie_importer_remove_diacritics( $value );
++    $value = aie_importer_lower( $value );
++    $value = preg_replace( '/[^a-z0-9]+/u', ' ', $value );
++    $value = trim( $value );
++    return preg_replace( '/\s+/', ' ', $value );
++}
++
++function aie_importer_build_header_lookup( array $header_row ) {
++    $lookup = [];
++    foreach ( $header_row as $col => $label ) {
++        $normalized = aie_importer_normalize_header_key( $label );
++        if ( '' === $normalized ) {
++            continue;
++        }
++        if ( ! isset( $lookup[ $normalized ] ) ) {
++            $lookup[ $normalized ] = [
++                'letter' => $col,
++                'header' => aie_importer_clean_text( $label ),
++            ];
++        }
++    }
++    return $lookup;
++}
++
++function aie_importer_resolve_header( array $lookup, array $candidates ) {
++    foreach ( $candidates as $candidate ) {
++        $normalized = aie_importer_normalize_header_key( $candidate );
++        if ( '' === $normalized ) {
++            continue;
++        }
++        if ( isset( $lookup[ $normalized ] ) ) {
++            return $lookup[ $normalized ];
++        }
++    }
++    return null;
++}
++
++function aie_importer_csv_header_candidates() {
++    return [
++        'idAlbum'             => [ 'id_album', 'album_id', 'codigo_album', 'codigo de album', 'idalbum' ],
++        'title'               => [ 'album', 'album sencillo', 'album/sencillo', 'titulo album', 'titulo_album', 'nombre album', 'nombre del album', 'interprete', 'titulo', 'título' ],
++        'tipo'                => [ 'tipo', 'tipo producto', 'formato', 'formato de publicacion' ],
++        'label'               => [ 'label', 'sello', 'sello discografico', 'sello discográfico', 'featuring' ],
++        'year'                => [ 'year', 'year_publi', 'anio', 'año', 'fecha publicacion', 'fecha_publicacion' ],
++        'artistName'          => [ 'interprete', 'artista', 'nombre artista', 'nombre del artista', 'nombre' ],
++        'trackTitle'          => [ 'titulo', 'titulo cancion', 'titulo_cancion', 'nombre tema', 'nombre_tema' ],
++        'trackNumber'         => [ 'numero_obra', 'numero', 'track', 'track_number' ],
++        'trackISRC'           => [ 'isrc' ],
++        'trackDuration'       => [ 'duracion', 'duration', 'tiempo' ],
++        'cedula'              => [ 'cedula', 'identificacion', 'numero identificacion', 'numero_de_identificacion' ],
++        'performerInstrument' => [ 'instrumento' ],
++        'performerRole'       => [ 'rol', 'rol interprete', 'rol_interprete', 'idrol' ],
++    ];
++}
++
++function aie_importer_apply_csv_header_map( array $col, array $header_row ) {
++    $lookup   = aie_importer_build_header_lookup( $header_row );
++    $matches  = [];
++    $candidates = aie_importer_csv_header_candidates();
++    foreach ( $col as $key => $letter ) {
++        if ( ! isset( $candidates[ $key ] ) ) {
++            continue;
++        }
++        $resolved = aie_importer_resolve_header( $lookup, $candidates[ $key ] );
++        if ( $resolved ) {
++            $col[ $key ]     = $resolved['letter'];
++            $matches[ $key ] = $resolved['header'];
++        }
++    }
++    return [ $col, $matches, $lookup ];
++}
++
++function aie_importer_cell_value( array $row, array $col, $key ) {
++    if ( ! isset( $col[ $key ] ) ) {
++        return '';
++    }
++    $letter = $col[ $key ];
++    $value  = isset( $row[ $letter ] ) ? $row[ $letter ] : '';
++    return aie_importer_clean_text( $value );
++}
++
++function aie_importer_resolve_title( $aid, array $rows, array $col, $post_type, array $header_matches, array $header_lookup ) {
++    if ( isset( $col['title'] ) ) {
++        foreach ( $rows as $row ) {
++            $value = aie_importer_cell_value( $row, $col, 'title' );
++            if ( '' !== $value ) {
++                $header = isset( $header_matches['title'] ) ? $header_matches['title'] : $col['title'];
++                return [ $value, 'album_header', $header ];
++            }
++        }
++    }
++
++    if ( ! empty( $header_lookup ) ) {
++        $candidates = aie_importer_csv_header_candidates();
++        $candidate_list = isset( $candidates['title'] ) ? $candidates['title'] : [];
++        $tried      = isset( $col['title'] ) ? $col['title'] : null;
++        foreach ( $candidate_list as $candidate ) {
++            $normalized = aie_importer_normalize_header_key( $candidate );
++            if ( '' === $normalized || ! isset( $header_lookup[ $normalized ] ) ) {
++                continue;
++            }
++            $candidate_letter = $header_lookup[ $normalized ]['letter'];
++            if ( $candidate_letter === $tried ) {
++                continue;
++            }
++            foreach ( $rows as $row ) {
++                $value = aie_importer_clean_text( isset( $row[ $candidate_letter ] ) ? $row[ $candidate_letter ] : '' );
++                if ( '' !== $value ) {
++                    return [ $value, 'album_header', $header_lookup[ $normalized ]['header'] ];
++                }
++            }
++        }
++    }
++
++    if ( 'sencillo' === $post_type && isset( $col['trackTitle'] ) ) {
++        $unique = [];
++        foreach ( $rows as $row ) {
++            $value = aie_importer_cell_value( $row, $col, 'trackTitle' );
++            if ( '' === $value ) {
++                continue;
++            }
++            $unique[ aie_importer_lower( $value ) ] = $value;
++        }
++        if ( 1 === count( $unique ) ) {
++            return [ reset( $unique ), 'single_track_title', null ];
++        }
++    }
++
++    if ( isset( $col['idAlbum'] ) ) {
++        foreach ( $rows as $row ) {
++            $value = aie_importer_cell_value( $row, $col, 'idAlbum' );
++            if ( '' !== $value ) {
++                return [ $value, 'id_album', null ];
++            }
++        }
++    }
++
++    return [ 'Import ' . $aid, 'synthetic', null ];
++}
++
+ WP_CLI::add_command( 'aie import', function( $args ) {
+     list( $file ) = $args;
+ 
+@@ -24,6 +208,8 @@
+     if ( ! file_exists( $file ) ) {
+         WP_CLI::error( "File not found: {$file}" );
+     }
++
++    $extension = strtolower( pathinfo( $file, PATHINFO_EXTENSION ) );
+ 
+     // 2) Load spreadsheet into rows array
+     $spreadsheet = IOFactory::load( $file );
+@@ -47,11 +233,20 @@
+         'performerRole'       => 'H',
+     ];
+ 
++    $header_matches = [];
++    $header_lookup  = [];
++    if ( ! empty( $rows ) ) {
++        $first_row = reset( $rows );
++        if ( 'csv' === $extension ) {
++            list( $col, $header_matches, $header_lookup ) = aie_importer_apply_csv_header_map( $col, $first_row );
++        }
++    }
++
+     // 4) Group rows by ID_ALBUM
+     $groups = [];
+     foreach ( $rows as $i => $r ) {
+         if ( $i === 1 ) continue; // skip header
+-        $aid = trim( $r[ $col['idAlbum'] ] );
++        $aid = aie_importer_cell_value( $r, $col, 'idAlbum' );
+         if ( ! $aid ) {
+             WP_CLI::warning( "Row {$i}: empty ID_ALBUM" );
+             continue;
+@@ -64,13 +259,23 @@
+         $first = reset( $items );
+ 
+         // a) Determine CPT
+-        $tipo = strtolower( trim( $first[ $col['tipo'] ] ) );
+-        $post_type = ( false !== strpos( $tipo, 'sencillo' ) || false !== strpos( $tipo, 'single' ) )
++        $tipo = aie_importer_cell_value( $first, $col, 'tipo' );
++        $post_type_hint = aie_importer_lower( $tipo );
++        $post_type = ( false !== strpos( $post_type_hint, 'sencillo' ) || false !== strpos( $post_type_hint, 'single' ) )
+             ? 'sencillo'
+             : 'fonograma';
+ 
++        list( $resolved_title, $title_source, $title_context ) = aie_importer_resolve_title( $aid, $items, $col, $post_type, $header_matches, $header_lookup );
++        if ( 'album_header' !== $title_source ) {
++            $log_context = $title_context ? " ({$title_context})" : '';
++            WP_CLI::log( "ID_ALBUM {$aid}: title fallback {$title_source}{$log_context}" );
++        } else {
++            $log_context = $title_context ? " ({$title_context})" : '';
++            WP_CLI::log( "ID_ALBUM {$aid}: title from header{$log_context}" );
++        }
++
+         // b) Find main user by cédula
+-        $ced = trim( $first[ $col['cedula'] ] );
++        $ced = aie_importer_cell_value( $first, $col, 'cedula' );
+         $found = get_users([
+             'meta_key'   => 'numero_de_identificacion',
+             'meta_value' => $ced,
+@@ -81,7 +286,7 @@
+         // c) Create post with author if found
+         $post_args = [
+             'post_type'   => $post_type,
+-            'post_title'  => trim( $first[ $col['title'] ] ),
++            'post_title'  => $resolved_title,
+             'post_status' => 'publish',
+         ];
+         if ( $main_user ) {
+@@ -109,16 +314,16 @@
+             'pubtype' => 'field_65fb86103e5e3',
+         ];
+         $keys = ( 'fonograma' === $post_type ) ? $keys_fono : $keys_senc;
+-        update_field( $keys['label'],   trim( $first[ $col['label'] ] ),   $post_id );
+-        update_field( $keys['year'],    trim( $first[ $col['year'] ] ),    $post_id );
+-        update_field( $keys['artist'],  trim( $first[ $col['artistName'] ] ), $post_id );
+-        update_field( $keys['pubtype'], trim( $first[ $col['tipo'] ] ),     $post_id );
++        update_field( $keys['label'],   aie_importer_cell_value( $first, $col, 'label' ),      $post_id );
++        update_field( $keys['year'],    aie_importer_cell_value( $first, $col, 'year' ),       $post_id );
++        update_field( $keys['artist'],  aie_importer_cell_value( $first, $col, 'artistName' ), $post_id );
++        update_field( $keys['pubtype'], $tipo,                                                $post_id );
+ 
+         // e) Build nested repeater rows
+         $rows_data = [];
+         foreach ( $items as $idx => $r ) {
+             // find performer user
+-            $c = trim( $r[ $col['cedula'] ] );
++            $c = aie_importer_cell_value( $r, $col, 'cedula' );
+             $u = get_users([
+                 'meta_key'   => 'numero_de_identificacion',
+                 'meta_value' => $c,
+@@ -133,32 +338,32 @@
+             // track sub-fields
+             if ( 'fonograma' === $post_type ) {
+                 $track = [
+-                    'field_65f31861a7ebf' => trim( $r[ $col['trackTitle'] ] ),    // titulo_de_la_cancion
+-                    'field_65f31871a7ec0' => trim( $r[ $col['trackISRC'] ] ),     // isrc
+-                    'field_65f3189ca7ec1' => trim( $r[ $col['trackNumber'] ] ),   // numero_de_tema
+-                    'field_65f318b5a7ec2' => trim( $r[ $col['trackDuration'] ] ), // duracion_del_tema
++                    'field_65f31861a7ebf' => aie_importer_cell_value( $r, $col, 'trackTitle' ),    // titulo_de_la_cancion
++                    'field_65f31871a7ec0' => aie_importer_cell_value( $r, $col, 'trackISRC' ),     // isrc
++                    'field_65f3189ca7ec1' => aie_importer_cell_value( $r, $col, 'trackNumber' ),   // numero_de_tema
++                    'field_65f318b5a7ec2' => aie_importer_cell_value( $r, $col, 'trackDuration' ), // duracion_del_tema
+                 ];
+                 $interp_key = 'field_65f318d3a7ec3';
+                 $track[ $interp_key ] = [[
+                     'field_65f318f0a7ec4' => $user->display_name,               // nombre_completo
+                     'field_65f31903a7ec5' => $user->ID,                         // id_de_usuario
+-                    'field_65f3191da7ec6' => trim( $r[ $col['performerInstrument'] ] ), // instrumento
+-                    'field_65f31927a7ec7' => trim( $r[ $col['performerRole'] ] ),       // role
++                    'field_65f3191da7ec6' => aie_importer_cell_value( $r, $col, 'performerInstrument' ), // instrumento
++                    'field_65f31927a7ec7' => aie_importer_cell_value( $r, $col, 'performerRole' ),       // role
+                 ]];
+                 $repeater_key = 'field_64f5266bb2994';
+             } else {
+                 $track = [
+-                    'field_65fb8610410b9' => trim( $r[ $col['trackTitle'] ] ),    // titulo_de_la_cancion
+-                    'field_65fb8610410bd' => trim( $r[ $col['trackISRC'] ] ),     // isrc
+-                    'field_65fb8610410c0' => trim( $r[ $col['trackNumber'] ] ),   // numero_de_tema
+-                    'field_65fb8610410c2' => trim( $r[ $col['trackDuration'] ] ), // duracion_del_tema
++                    'field_65fb8610410b9' => aie_importer_cell_value( $r, $col, 'trackTitle' ),    // titulo_de_la_cancion
++                    'field_65fb8610410bd' => aie_importer_cell_value( $r, $col, 'trackISRC' ),     // isrc
++                    'field_65fb8610410c0' => aie_importer_cell_value( $r, $col, 'trackNumber' ),   // numero_de_tema
++                    'field_65fb8610410c2' => aie_importer_cell_value( $r, $col, 'trackDuration' ), // duracion_del_tema
+                 ];
+                 $interp_key = 'field_65fb8610410c5';
+                 $track[ $interp_key ] = [[
+                     'field_65fb861042707' => $user->display_name,
+                     'field_65fb86104270a' => $user->ID,
+-                    'field_65fb86104270d' => trim( $r[ $col['performerInstrument'] ] ),
+-                    'field_65fb861042711' => trim( $r[ $col['performerRole'] ] ),
++                    'field_65fb86104270d' => aie_importer_cell_value( $r, $col, 'performerInstrument' ),
++                    'field_65fb861042711' => aie_importer_cell_value( $r, $col, 'performerRole' ),
+                 ]];
+                 $repeater_key = 'field_65fb86103e5ed';
+             }
+@@ -170,6 +375,6 @@
+         update_field( $repeater_key, $rows_data, $post_id );
+ 
+         // Success message
+-        WP_CLI::success( ucfirst($post_type)." "" . trim( $first[ $col['title'] ] ) . "" imported as post #{$post_id}" );
++        WP_CLI::success( ucfirst( $post_type ) . " \"" . $resolved_title . "\" imported as post #{$post_id}" );
+     }
+ } );
