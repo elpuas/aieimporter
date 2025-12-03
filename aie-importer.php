@@ -9,6 +9,7 @@
  */
 
 require_once __DIR__ . '/src/Services/ImporterService.php';
+require_once __DIR__ . '/src/Services/LoggerService.php';
 
 // Load PhpSpreadsheet only when running via WP-CLI to avoid unnecessary overhead in wp-admin.
 if ( defined( 'WP_CLI' ) && WP_CLI ) {
@@ -199,6 +200,7 @@ if ( defined( 'WP_CLI' ) && WP_CLI ) {
 const AIEIMPORTER_MENU_SLUG   = 'aieimporter-import';
 const AIEIMPORTER_NONCE_FIELD = 'aieimporter_import_nonce';
 const AIEIMPORTER_NONCE_ACTION = 'aieimporter_import_action';
+const AIEIMPORTER_TRANSIENT_KEY = 'aieimporter_last_import_summary';
 
 add_action( 'admin_menu', 'aieimporter_register_menu_page' );
 /**
@@ -226,17 +228,40 @@ function aieimporter_render_notices() {
 
     $type    = isset( $_GET['aieimporter_status'] ) ? sanitize_key( $_GET['aieimporter_status'] ) : '';
     $message = isset( $_GET['aieimporter_message'] ) ? sanitize_text_field( wp_unslash( $_GET['aieimporter_message'] ) ) : '';
+    $import_completed = isset( $_GET['import_completed'] ) ? (int) $_GET['import_completed'] : 0;
 
-    if ( ! $type || ! $message ) {
-        return;
+    if ( $type && $message ) {
+        $class = 'notice notice-' . ( 'success' === $type ? 'success' : 'error' );
+        printf(
+            '<div class="%1$s"><p>%2$s</p></div>',
+            esc_attr( $class ),
+            esc_html( $message )
+        );
     }
 
-    $class = 'notice notice-' . ( 'success' === $type ? 'success' : 'error' );
-    printf(
-        '<div class="%1$s"><p>%2$s</p></div>',
-        esc_attr( $class ),
-        esc_html( $message )
-    );
+    if ( $import_completed ) {
+        $summary = get_transient( AIEIMPORTER_TRANSIENT_KEY );
+        if ( $summary && is_array( $summary ) ) {
+            delete_transient( AIEIMPORTER_TRANSIENT_KEY );
+            $warnings = isset( $summary['warnings'] ) && is_array( $summary['warnings'] ) ? $summary['warnings'] : [];
+            $counts_message = sprintf(
+                /* translators: 1: albums, 2: singles, 3: songs, 4: performers */
+                __( 'Import completed. Albums: %1$s, Singles: %2$s, Songs: %3$s, Performers: %4$s.', 'aie-importer' ),
+                intval( $summary['albums_created'] ?? 0 ),
+                intval( $summary['singles_created'] ?? 0 ),
+                intval( $summary['songs_created'] ?? 0 ),
+                intval( $summary['performers_created'] ?? 0 )
+            );
+            echo '<div class="notice notice-success"><p>' . esc_html( $counts_message ) . '</p></div>';
+            if ( ! empty( $warnings ) ) {
+                echo '<div class="notice notice-warning"><p>' . esc_html__( 'Warnings:', 'aie-importer' ) . '</p><ul>';
+                foreach ( $warnings as $warning ) {
+                    echo '<li>' . esc_html( $warning ) . '</li>';
+                }
+                echo '</ul></div>';
+            }
+        }
+    }
 }
 
 /**
@@ -253,7 +278,7 @@ function aieimporter_render_admin_page() {
         <p><?php esc_html_e( 'Sube el archivo Excel oficial y haz clic en “Start Import”. No se requieren configuraciones adicionales.', 'aie-importer' ); ?></p>
         <form method="post" enctype="multipart/form-data" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
             <?php wp_nonce_field( AIEIMPORTER_NONCE_ACTION, AIEIMPORTER_NONCE_FIELD ); ?>
-            <input type="hidden" name="action" value="aieimporter_handle_upload" />
+            <input type="hidden" name="action" value="aieimporter_import" />
             <table class="form-table" role="presentation">
                 <tbody>
                 <tr>
@@ -273,11 +298,11 @@ function aieimporter_render_admin_page() {
     <?php
 }
 
-add_action( 'admin_post_aieimporter_handle_upload', 'aieimporter_handle_upload' );
+add_action( 'admin_post_aieimporter_import', 'aieimporter_handle_import' );
 /**
- * Handle the upload submission with basic validation.
+ * Handle the upload, run the importer, and redirect with summary.
  */
-function aieimporter_handle_upload() {
+function aieimporter_handle_import() {
     if ( ! current_user_can( 'manage_options' ) ) {
         wp_die( esc_html__( 'You do not have permission to perform this action.', 'aie-importer' ) );
     }
@@ -289,6 +314,7 @@ function aieimporter_handle_upload() {
     }
 
     $file = $_FILES['aieimporter_file'];
+
     if ( ! empty( $file['error'] ) ) {
         aieimporter_redirect_with_notice( 'error', __( 'Ocurrió un error al subir el archivo. Intenta de nuevo.', 'aie-importer' ) );
     }
@@ -298,22 +324,41 @@ function aieimporter_handle_upload() {
         aieimporter_redirect_with_notice( 'error', __( 'Solo se permiten archivos .xlsx. Por favor, sube el archivo oficial.', 'aie-importer' ) );
     }
 
-    $overrides = [
-        'test_form' => false,
-        'mimes'     => [
-            'xlsx' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        ],
-    ];
-
-    $uploaded = wp_handle_upload( $file, $overrides );
-
-    if ( isset( $uploaded['error'] ) ) {
-        aieimporter_redirect_with_notice( 'error', __( 'No se pudo procesar el archivo. Verifica el formato e inténtalo de nuevo.', 'aie-importer' ) );
+    $filetype = wp_check_filetype_and_ext( $file['tmp_name'], $file['name'], [
+        'xlsx' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    ] );
+    if ( ! $filetype['ext'] || 'xlsx' !== $filetype['ext'] ) {
+        aieimporter_redirect_with_notice( 'error', __( 'El archivo no es un .xlsx válido.', 'aie-importer' ) );
     }
 
-    // Placeholder: ImporterService execution will hook here.
+    $uploads = wp_upload_dir();
+    $target_dir = trailingslashit( $uploads['basedir'] ) . 'aieimporter/';
+    wp_mkdir_p( $target_dir );
 
-    aieimporter_redirect_with_notice( 'success', __( 'Archivo recibido. Iniciando importación.', 'aie-importer' ) );
+    $filename   = wp_unique_filename( $target_dir, basename( $file['name'] ) );
+    $targetpath = $target_dir . $filename;
+
+    if ( ! @move_uploaded_file( $file['tmp_name'], $targetpath ) ) {
+        aieimporter_redirect_with_notice( 'error', __( 'No se pudo mover el archivo subido. Inténtalo de nuevo.', 'aie-importer' ) );
+    }
+
+    try {
+        $service = new \AIEImporter\Services\ImporterService();
+        $summary = $service->import( $targetpath );
+        \AIEImporter\Services\LoggerService::log_import( $summary, $targetpath );
+        set_transient( AIEIMPORTER_TRANSIENT_KEY, $summary, MINUTE_IN_SECONDS );
+        $url = add_query_arg(
+            [
+                'page'             => AIEIMPORTER_MENU_SLUG,
+                'import_completed' => 1,
+            ],
+            admin_url( 'admin.php' )
+        );
+        wp_safe_redirect( $url );
+        exit;
+    } catch ( \Throwable $e ) {
+        aieimporter_redirect_with_notice( 'error', $e->getMessage() );
+    }
 }
 
 /**

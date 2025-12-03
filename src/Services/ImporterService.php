@@ -251,23 +251,34 @@ class ImporterService {
      * @return array<string, int> Counts.
      */
     public function build_song_repeater( array $rows, int $post_id ): array {
-        $repeater_rows     = [];
-        $performers_total  = 0;
+        $songs_by_key     = [];
+        $performers_total = 0;
 
         foreach ( $rows as $index => $row ) {
-            $performers      = $this->build_artist_nested_repeater( $row, $index + 1 );
-            $performers_total += count( $performers );
+            $song_key = $row['track_title'] . '|' . $row['track_number'];
 
-            $repeater_rows[] = [
-                'titulo_de_la_cancion'      => $row['track_title'],
-                'isrc'                      => $row['track_isrc'],
-                'numero_de_tema'            => $row['track_number'],
-                'duracion_del_tema'         => $row['duration'],
-                'fonogramas_en_mp3_y_wave'  => '', // File matching not available in Excel import.
-                'interpretes_y_ejecutantes' => $performers,
-            ];
+            if ( ! isset( $songs_by_key[ $song_key ] ) ) {
+                $songs_by_key[ $song_key ] = [
+                    'titulo_de_la_cancion'      => $row['track_title'],
+                    'isrc'                      => $row['track_isrc'],
+                    'numero_de_tema'            => $row['track_number'],
+                    'duracion_del_tema'         => $row['duration'],
+                    'fonogramas_en_mp3_y_wave'  => '',
+                    'interpretes_y_ejecutantes' => [],
+                ];
+            }
+
+            $performers = $this->build_artist_nested_repeater( $row, $index + 1 );
+
+            $songs_by_key[ $song_key ]['interpretes_y_ejecutantes'] = array_merge(
+                $songs_by_key[ $song_key ]['interpretes_y_ejecutantes'],
+                $performers
+            );
+
+            $performers_total += count( $performers );
         }
 
+        $repeater_rows = array_values( $songs_by_key );
         $this->update_field( FieldConstants::MAIN_SONGS_REPEATER, $repeater_rows, $post_id );
 
         return [
