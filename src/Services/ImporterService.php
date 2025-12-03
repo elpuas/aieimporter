@@ -254,10 +254,24 @@ class ImporterService {
                     'titulo_de_la_cancion'      => $row['track_title'],
                     'isrc'                      => $row['track_isrc'],
                     'bmat'                      => $row['bmat'],
-                    'duracion_en_segundos'      => $row['duration'],
+                    'duracion_del_tema'         => $row['duration'],
                     'codigo_de_obra'            => $row['obra_code'],
                     'interpretes_y_ejecutantes' => [],
                 ];
+            } else {
+                // Fill missing values if subsequent rows carry the data.
+                if ( '' === $songs_by_key[ $song_key ]['duracion_del_tema'] && '' !== $row['duration'] ) {
+                    $songs_by_key[ $song_key ]['duracion_del_tema'] = $row['duration'];
+                }
+                if ( '' === $songs_by_key[ $song_key ]['bmat'] && '' !== $row['bmat'] ) {
+                    $songs_by_key[ $song_key ]['bmat'] = $row['bmat'];
+                }
+                if ( '' === $songs_by_key[ $song_key ]['isrc'] && '' !== $row['track_isrc'] ) {
+                    $songs_by_key[ $song_key ]['isrc'] = $row['track_isrc'];
+                }
+                if ( '' === $songs_by_key[ $song_key ]['codigo_de_obra'] && '' !== $row['obra_code'] ) {
+                    $songs_by_key[ $song_key ]['codigo_de_obra'] = $row['obra_code'];
+                }
             }
 
             $performers = $this->build_artist_nested_repeater( $row, $index + 1 );

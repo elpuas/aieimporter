@@ -12,7 +12,7 @@ SONG REPEATER
         TITULO (B)      -> titulo_de_la_cancion
         ISRC (N)        -> isrc
         BMAT (E)        -> bmat
-        DURACION (R)    -> duracion_en_segundos
+        DURACION (R)    -> duracion_del_tema
         NUMERO_OBRA (A) -> codigo_de_obra
 
 NESTED REPEATER

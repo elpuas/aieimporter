@@ -38,7 +38,7 @@ if ( defined( 'WP_CLI' ) && WP_CLI ) {
             'trackTitle'          => 'B',
             'trackNumber'         => 'A',
             'trackISRC'           => 'M',
-            'trackDuration'       => 'Q',
+            'trackDuration'       => 'R',
             'bmat'                => 'D', // ID_BMAT
             'cedula'              => 'G',
             'performerName'       => 'F',
@@ -276,7 +276,7 @@ function aieimporter_render_admin_page() {
     <div class="wrap">
         <h1><?php esc_html_e( 'AIE Importer', 'aie-importer' ); ?></h1>
         <p><?php esc_html_e( 'Sube el archivo Excel oficial y haz clic en “Start Import”. No se requieren configuraciones adicionales.', 'aie-importer' ); ?></p>
-        <form method="post" enctype="multipart/form-data" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+        <form method="post" enctype="multipart/form-data" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="flex:1; width:50%;">
             <?php wp_nonce_field( AIEIMPORTER_NONCE_ACTION, AIEIMPORTER_NONCE_FIELD ); ?>
             <input type="hidden" name="action" value="aieimporter_import" />
             <table class="form-table" role="presentation">
@@ -293,6 +293,17 @@ function aieimporter_render_admin_page() {
                 </tbody>
             </table>
             <?php submit_button( __( 'Start Import', 'aie-importer' ) ); ?>
+
+            <div style="background:#fff3cd; border:1px solid #ffeeba; padding:10px; margin-top:20px;">
+                <p style="font-size: 12px;"><strong>Importante sobre archivos grandes:</strong></p>
+                <p style="font-size: 12px;">Los archivos Excel se procesan completos en memoria. Como referencia práctica:</p>
+                <ul style="margin-left:18px; font-size: 12px;">
+                    <li>• Hasta 1,000 filas: importación normal y estable</li>
+                    <li>• Entre 1,000 y 5,000 filas: puede tardar más o requerir mayor memoria</li>
+                    <li>• Más de 5,000 filas: el servidor podría no completar la importación</li>
+                    <li>• Más de 10,000 filas: altamente probable que falle sin aumentar el memory_limit</li>
+                </ul>
+            </div>
         </form>
     </div>
     <?php
