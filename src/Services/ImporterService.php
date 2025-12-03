@@ -7,7 +7,6 @@
 
 namespace AIEImporter\Services;
 
-use AIECostaRica\Constants\FieldConstants;
 use InvalidArgumentException;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 
@@ -22,21 +21,19 @@ class ImporterService {
      * @var array<string, string>
      */
     private $column_map = [
-        'track_number'   => 'A',
+        'obra_code'      => 'A',
         'track_title'    => 'B',
-        'label'          => 'C',
-        'bmat'           => 'D',
-        'performer_name' => 'F',
-        'cedula'         => 'G',
-        'performer_role' => 'H',
-        'tipo'           => 'I',
-        'performer_instr'=> 'J',
-        'album_title'    => 'K',
-        'id_album'       => 'L',
-        'track_isrc'     => 'M',
-        'artist_name'    => 'N',
-        'year'           => 'P',
-        'duration'       => 'Q',
+        'artist_name'    => 'C',
+        'bmat'           => 'E',
+        'performer_name' => 'G',
+        'cedula'         => 'H',
+        'performer_role' => 'I',
+        'performer_instr'=> 'K',
+        'album_title'    => 'L',
+        'id_album'       => 'M',
+        'track_isrc'     => 'N',
+        'year'           => 'Q',
+        'duration'       => 'R',
     ];
 
     /**
@@ -130,21 +127,19 @@ class ImporterService {
             }
 
             $rows[] = [
-                'track_number'   => $this->cell( $row, 'track_number' ),
                 'track_title'    => $this->cell( $row, 'track_title' ),
-                'label'          => $this->cell( $row, 'label' ),
+                'artist_name'    => $this->cell( $row, 'artist_name' ),
                 'bmat'           => $this->cell( $row, 'bmat' ),
                 'performer_name' => $this->cell( $row, 'performer_name' ),
                 'cedula'         => $this->cell( $row, 'cedula' ),
                 'performer_role' => $this->cell( $row, 'performer_role' ),
-                'tipo'           => $this->cell( $row, 'tipo' ),
                 'performer_instr'=> $this->cell( $row, 'performer_instr' ),
                 'album_title'    => $this->cell( $row, 'album_title' ),
                 'id_album'       => $this->cell( $row, 'id_album' ),
                 'track_isrc'     => $this->cell( $row, 'track_isrc' ),
-                'artist_name'    => $this->cell( $row, 'artist_name' ),
                 'year'           => $this->cell( $row, 'year' ),
                 'duration'       => $this->cell( $row, 'duration' ),
+                'obra_code'      => $this->cell( $row, 'obra_code' ),
             ];
         }
 
@@ -162,7 +157,8 @@ class ImporterService {
         foreach ( $rows as $idx => $row ) {
             $album_id = $row['id_album'];
             if ( '' === $album_id ) {
-                $album_id = 'single-' . $idx;
+                $single_key = $row['obra_code'] ?: (string) $idx;
+                $album_id   = 'single-' . $single_key;
             }
 
             if ( ! isset( $groups[ $album_id ] ) ) {
@@ -200,11 +196,9 @@ class ImporterService {
             return 0;
         }
 
-        $this->update_field( FieldConstants::SELLO_DISCOGRAFICO, $first['label'], $post_id );
-        $this->update_field( FieldConstants::ANO_DE_PUBLICACION, $first['year'], $post_id );
-        $this->update_field( FieldConstants::NOMBRE_DEL_ARTISTA_SOLISTA_O_AGRUPACION, $first['artist_name'], $post_id );
-        $this->update_field( FieldConstants::TIPO_DE_PUBLICACION, $first['tipo'], $post_id );
-        $this->update_field( FieldConstants::TITULO_DEL_ALBUM_O_SENCILLO, $first['album_title'], $post_id );
+        $this->update_field( 'ano_de_publicacion', $first['year'], $post_id );
+        $this->update_field( 'nombre_del_artista_solista_o_agrupacion', $first['artist_name'], $post_id );
+        $this->update_field( 'numero_album_o_single', $first['id_album'], $post_id );
 
         return (int) $post_id;
     }
@@ -217,7 +211,7 @@ class ImporterService {
      */
     public function build_sencillo( array $rows ): int {
         $first      = $rows[0];
-        $post_title = $first['track_title'] ?: $first['album_title'];
+        $post_title = $first['track_title'];
 
         $post_id = \wp_insert_post(
             [
@@ -234,11 +228,9 @@ class ImporterService {
             return 0;
         }
 
-        $this->update_field( FieldConstants::SELLO_DISCOGRAFICO, $first['label'], $post_id );
-        $this->update_field( FieldConstants::ANO_DE_PUBLICACION, $first['year'], $post_id );
-        $this->update_field( FieldConstants::NOMBRE_DEL_ARTISTA_SOLISTA_O_AGRUPACION, $first['artist_name'], $post_id );
-        $this->update_field( FieldConstants::TIPO_DE_PUBLICACION, $first['tipo'], $post_id );
-        $this->update_field( FieldConstants::TITULO_DEL_ALBUM_O_SENCILLO, $first['track_title'], $post_id );
+        $this->update_field( 'ano_de_publicacion', $first['year'], $post_id );
+        $this->update_field( 'nombre_del_artista_solista_o_agrupacion', $first['artist_name'], $post_id );
+        $this->update_field( 'numero_album_o_single', $first['id_album'], $post_id );
 
         return (int) $post_id;
     }
@@ -255,15 +247,15 @@ class ImporterService {
         $performers_total = 0;
 
         foreach ( $rows as $index => $row ) {
-            $song_key = $row['track_title'] . '|' . $row['track_number'];
+            $song_key = $row['track_title'] . '|' . $row['obra_code'];
 
             if ( ! isset( $songs_by_key[ $song_key ] ) ) {
                 $songs_by_key[ $song_key ] = [
                     'titulo_de_la_cancion'      => $row['track_title'],
                     'isrc'                      => $row['track_isrc'],
-                    'numero_de_tema'            => $row['track_number'],
-                    'duracion_del_tema'         => $row['duration'],
-                    'fonogramas_en_mp3_y_wave'  => '',
+                    'bmat'                      => $row['bmat'],
+                    'duracion_en_segundos'      => $row['duration'],
+                    'codigo_de_obra'            => $row['obra_code'],
                     'interpretes_y_ejecutantes' => [],
                 ];
             }
@@ -279,7 +271,7 @@ class ImporterService {
         }
 
         $repeater_rows = array_values( $songs_by_key );
-        $this->update_field( FieldConstants::MAIN_SONGS_REPEATER, $repeater_rows, $post_id );
+        $this->update_field( 'nombre_de_cada_tema_del_album_o_sencillo', $repeater_rows, $post_id );
 
         return [
             'songs'      => count( $repeater_rows ),
@@ -351,6 +343,7 @@ class ImporterService {
 
         return is_scalar( $value ) ? trim( (string) $value ) : '';
     }
+
 
     /**
      * Update an ACF field if available, otherwise use post meta.
