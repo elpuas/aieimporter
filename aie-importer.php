@@ -244,6 +244,7 @@ function aieimporter_render_notices() {
         if ( $summary && is_array( $summary ) ) {
             delete_transient( AIEIMPORTER_TRANSIENT_KEY );
             $warnings = isset( $summary['warnings'] ) && is_array( $summary['warnings'] ) ? $summary['warnings'] : [];
+            $post_status_used = isset( $summary['post_status_used'] ) ? $summary['post_status_used'] : '';
             $counts_message = sprintf(
                 /* translators: 1: albums, 2: singles, 3: songs, 4: performers */
                 __( 'Import completed. Albums: %1$s, Singles: %2$s, Songs: %3$s, Performers: %4$s.', 'aie-importer' ),
@@ -252,7 +253,11 @@ function aieimporter_render_notices() {
                 intval( $summary['songs_created'] ?? 0 ),
                 intval( $summary['performers_created'] ?? 0 )
             );
-            echo '<div class="notice notice-success"><p>' . esc_html( $counts_message ) . '</p></div>';
+            echo '<div class="notice notice-success"><p>' . esc_html( $counts_message ) . '</p>';
+            if ( $post_status_used ) {
+                echo '<p>' . esc_html( sprintf( __( 'Estado aplicado: %s', 'aie-importer' ), $post_status_used ) ) . '</p>';
+            }
+            echo '</div>';
             if ( ! empty( $warnings ) ) {
                 echo '<div class="notice notice-warning"><p>' . esc_html__( 'Warnings:', 'aie-importer' ) . '</p><ul>';
                 foreach ( $warnings as $warning ) {
@@ -292,6 +297,21 @@ function aieimporter_render_admin_page() {
                 </tr>
                 </tbody>
             </table>
+            <table class="form-table" role="presentation">
+                <tbody>
+                <tr>
+                    <th scope="row">
+                        <label for="aieimporter_post_status"><?php esc_html_e( 'Estado de publicación', 'aie-importer' ); ?></label>
+                    </th>
+                    <td>
+                        <select id="aieimporter_post_status" name="aieimporter_post_status">
+                            <option value="publish" selected><?php esc_html_e( 'publish', 'aie-importer' ); ?></option>
+                            <option value="draft"><?php esc_html_e( 'draft', 'aie-importer' ); ?></option>
+                        </select>
+                    </td>
+                </tr>
+                </tbody>
+            </table>
             <?php submit_button( __( 'Start Import', 'aie-importer' ) ); ?>
 
             <div style="background:#fff3cd; border:1px solid #ffeeba; padding:10px; margin-top:20px;">
@@ -322,6 +342,11 @@ function aieimporter_handle_import() {
 
     if ( ! isset( $_FILES['aieimporter_file'] ) || ! is_array( $_FILES['aieimporter_file'] ) ) {
         aieimporter_redirect_with_notice( 'error', __( 'No se recibió ningún archivo. Por favor, selecciona un .xlsx válido.', 'aie-importer' ) );
+    }
+
+    $post_status = isset( $_POST['aieimporter_post_status'] ) ? sanitize_key( wp_unslash( $_POST['aieimporter_post_status'] ) ) : '';
+    if ( ! in_array( $post_status, [ 'publish', 'draft' ], true ) ) {
+        $post_status = 'publish';
     }
 
     $file = $_FILES['aieimporter_file'];
@@ -355,7 +380,7 @@ function aieimporter_handle_import() {
 
     try {
         $service = new \AIEImporter\Services\ImporterService();
-        $summary = $service->import( $targetpath );
+        $summary = $service->import( $targetpath, $post_status );
         \AIEImporter\Services\LoggerService::log_import( $summary, $targetpath );
         set_transient( AIEIMPORTER_TRANSIENT_KEY, $summary, MINUTE_IN_SECONDS );
         $url = add_query_arg(

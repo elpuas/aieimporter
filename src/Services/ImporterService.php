@@ -47,9 +47,10 @@ class ImporterService {
      * Main entry point: import from XLSX file and return summary.
      *
      * @param string $file_path Absolute path to the XLSX file.
+     * @param string $post_status Post status to apply (publish|draft).
      * @return array<string, mixed>
      */
-    public function import( string $file_path ): array {
+    public function import( string $file_path, string $post_status = 'publish' ): array {
         $this->warnings = [];
 
         if ( ! file_exists( $file_path ) ) {
@@ -68,6 +69,10 @@ class ImporterService {
             }
         }
 
+        if ( ! in_array( $post_status, [ 'publish', 'draft' ], true ) ) {
+            $post_status = 'publish';
+        }
+
         $rows   = $this->parse_excel_rows( $file_path );
         $groups = $this->group_rows_by_album_id( $rows );
 
@@ -77,13 +82,14 @@ class ImporterService {
             'songs_created'      => 0,
             'performers_created' => 0,
             'warnings'           => [],
+            'post_status_used'   => $post_status,
         ];
 
         foreach ( $groups as $album_id => $group_rows ) {
             $is_album = '' !== $group_rows[0]['id_album'];
             $post_id  = $is_album
-                ? $this->build_fonograma( $group_rows )
-                : $this->build_sencillo( $group_rows );
+                ? $this->build_fonograma( $group_rows, $post_status )
+                : $this->build_sencillo( $group_rows, $post_status );
 
             if ( ! $post_id ) {
                 $this->warnings[] = sprintf(
@@ -175,9 +181,10 @@ class ImporterService {
      * Create a fonograma post and set top-level fields.
      *
      * @param array<int, array<string, string>> $rows Group rows.
+     * @param string                            $post_status Post status.
      * @return int Post ID or 0 on failure.
      */
-    public function build_fonograma( array $rows ): int {
+    public function build_fonograma( array $rows, string $post_status = 'publish' ): int {
         $first      = $rows[0];
         $post_title = $first['album_title'] ?: $first['track_title'];
 
@@ -185,7 +192,7 @@ class ImporterService {
             [
                 'post_type'   => 'fonograma',
                 'post_title'  => $post_title,
-                'post_status' => 'publish',
+                'post_status' => $post_status,
                 'post_author' => $this->find_user_by_cedula( $first['cedula'] ) ?: 0,
             ],
             true
@@ -207,9 +214,10 @@ class ImporterService {
      * Create a sencillo post and set top-level fields.
      *
      * @param array<int, array<string, string>> $rows Group rows.
+     * @param string                            $post_status Post status.
      * @return int Post ID or 0 on failure.
      */
-    public function build_sencillo( array $rows ): int {
+    public function build_sencillo( array $rows, string $post_status = 'publish' ): int {
         $first      = $rows[0];
         $post_title = $first['track_title'];
 
@@ -217,7 +225,7 @@ class ImporterService {
             [
                 'post_type'   => 'sencillo',
                 'post_title'  => $post_title,
-                'post_status' => 'publish',
+                'post_status' => $post_status,
                 'post_author' => $this->find_user_by_cedula( $first['cedula'] ) ?: 0,
             ],
             true
