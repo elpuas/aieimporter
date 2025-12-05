@@ -37,6 +37,20 @@ class ImporterService {
     ];
 
     /**
+     * ACF field key for BMAT inside the song repeater.
+     *
+     * @var string
+     */
+    private $bmat_field_key = 'field_652bf4845b32a';
+
+    /**
+     * ACF field key for Código de Obra inside the song repeater.
+     *
+     * @var string
+     */
+    private $codigo_obra_field_key = 'field_66b17354ab206';
+
+    /**
      * Collects non-fatal warnings.
      *
      * @var array<int, string>
@@ -253,6 +267,8 @@ class ImporterService {
     public function build_song_repeater( array $rows, int $post_id ): array {
         $songs_by_key     = [];
         $performers_total = 0;
+        $bmat_key         = $this->bmat_field_key;
+        $obra_key         = $this->codigo_obra_field_key;
 
         foreach ( $rows as $index => $row ) {
             $song_key = $row['track_title'] . '|' . $row['obra_code'];
@@ -261,9 +277,9 @@ class ImporterService {
                 $songs_by_key[ $song_key ] = [
                     'titulo_de_la_cancion'      => $row['track_title'],
                     'isrc'                      => $row['track_isrc'],
-                    'bmat'                      => $row['bmat'],
+                    $bmat_key                   => $row['bmat'],
                     'duracion_del_tema'         => $row['duration'],
-                    'codigo_de_obra'            => $row['obra_code'],
+                    $obra_key                   => $row['obra_code'],
                     'interpretes_y_ejecutantes' => [],
                 ];
             } else {
@@ -271,14 +287,14 @@ class ImporterService {
                 if ( '' === $songs_by_key[ $song_key ]['duracion_del_tema'] && '' !== $row['duration'] ) {
                     $songs_by_key[ $song_key ]['duracion_del_tema'] = $row['duration'];
                 }
-                if ( '' === $songs_by_key[ $song_key ]['bmat'] && '' !== $row['bmat'] ) {
-                    $songs_by_key[ $song_key ]['bmat'] = $row['bmat'];
+                if ( '' === $songs_by_key[ $song_key ][ $bmat_key ] && '' !== $row['bmat'] ) {
+                    $songs_by_key[ $song_key ][ $bmat_key ] = $row['bmat'];
                 }
                 if ( '' === $songs_by_key[ $song_key ]['isrc'] && '' !== $row['track_isrc'] ) {
                     $songs_by_key[ $song_key ]['isrc'] = $row['track_isrc'];
                 }
-                if ( '' === $songs_by_key[ $song_key ]['codigo_de_obra'] && '' !== $row['obra_code'] ) {
-                    $songs_by_key[ $song_key ]['codigo_de_obra'] = $row['obra_code'];
+                if ( '' === $songs_by_key[ $song_key ][ $obra_key ] && '' !== $row['obra_code'] ) {
+                    $songs_by_key[ $song_key ][ $obra_key ] = $row['obra_code'];
                 }
             }
 

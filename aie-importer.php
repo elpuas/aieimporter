@@ -39,7 +39,7 @@ if ( defined( 'WP_CLI' ) && WP_CLI ) {
             'trackNumber'         => 'A',
             'trackISRC'           => 'M',
             'trackDuration'       => 'R',
-            'bmat'                => 'D', // ID_BMAT
+            'bmat'                => 'E', // ID_BMAT (column E per sheet map)
             'cedula'              => 'G',
             'performerName'       => 'F',
             'performerInstrument' => 'J',
